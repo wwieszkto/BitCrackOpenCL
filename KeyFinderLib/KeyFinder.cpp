@@ -182,7 +182,7 @@ void KeyFinder::run()
 
 			double seconds = (double)t / 1000.0;
 
-			info.speed = (double)((double)count / seconds) / 1000000.0;
+			info.speed = (double)((double)count / seconds) / 1000.0;
 
 			info.total = _total;
 

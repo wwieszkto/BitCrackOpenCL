@@ -88,12 +88,14 @@ Callback to display progress
 void statusCallback(KeySearchStatus info)
 {
 	std::string speedStr;
-
-	if(info.speed < 0.01) {
-		speedStr = "< 0.01 MKey/s";
-	} else {
-		speedStr = util::format("%.2f", info.speed) + " MKey/s";
-	}
+    
+	if(info.speed < 1) {
+		speedStr = util::format("%.2f", info.speed * 1000) + " Key/s";
+	} else if (info.speed < 1000) {
+		speedStr = util::format("%.2f", info.speed) + " KKey/s";
+    } else {
+        speedStr = util::format("%.2f", info.speed / 1000.0) + " MKey/s";
+    }
 
 	std::string totalStr = "(" + util::formatThousands(_config.totalkeys + info.total) + " total)";
 
