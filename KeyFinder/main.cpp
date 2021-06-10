@@ -77,7 +77,7 @@ void resultCallback(KeySearchResult info)
 	std::string logStr = "\n\nAddress:     " + info.address + "\n";
 	logStr +=              "Private key: " + info.privateKey.toString() + "\n";
     logStr +=              "Compressed:  "; logStr += (info.compressed) ? "yes\n" : "no\n";
-    logStr +=              "Public key:  "; logStr += (info.compressed) ? info.publicKey.toString(true) + "\n" : info.publicKey.x.toString() + "\n            " + info.publicKey.y.toString() + "\n";
+    logStr +=              "Public key:  "; logStr += (info.compressed) ? info.publicKey.toString(true) + "\n" : info.publicKey.x.toString() + "\n             " + info.publicKey.y.toString() + "\n";
 
 	Logger::log(LogLevel::Notify, logStr);
 }

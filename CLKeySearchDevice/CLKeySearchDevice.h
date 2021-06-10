@@ -42,28 +42,17 @@ private:
 
     int _compression = PointCompressionType::COMPRESSED;
 
-    uint64_t _iterations = 0;
+    unsigned int _iterations = 0;
 
     secp256k1::uint256 _stride = 1;
 
     std::string _deviceName;
 
     // Device memory pointers
-    cl_mem _chain = NULL;
-
-    cl_mem _x = NULL;
-
-    cl_mem _y = NULL;
 
     cl_mem _xInc = NULL;
 
     cl_mem _yInc = NULL;
-
-    cl_mem _privateKeys = NULL;
-
-    cl_mem _xTable = NULL;
-    
-    cl_mem _yTable = NULL;
 
     cl_mem _deviceResults = NULL;
 

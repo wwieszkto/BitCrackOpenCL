@@ -75,7 +75,7 @@ __constant unsigned int K[8] = {
     a = rotl((a), (s)) + (e);\
     c = rotl((c), 10)
 
-void ripemd160p1(const unsigned int x[8], unsigned int digest[5])
+void ripemd160p1(__private const unsigned int x[8], unsigned int digest[5])
 {
     __private unsigned int a = RIPEMD160_IV[0];
     __private unsigned int b = RIPEMD160_IV[1];
@@ -318,27 +318,6 @@ typedef struct uint256_t {
 } uint256_t;
 
 /**
- * Base point X
- */
-__constant unsigned int GX[8] = {
-    0x79BE667E, 0xF9DCBBAC, 0x55A06295, 0xCE870B07, 0x029BFCDB, 0x2DCE28D9, 0x59F2815B, 0x16F81798
-};
-
-/**
- * Base point Y
- */
-__constant unsigned int GY[8] = {
-    0x483ADA77, 0x26A3C465, 0x5DA4FBFC, 0x0E1108A8, 0xFD17B448, 0xA6855419, 0x9C47D08F, 0xFB10D4B8
-};
-
-/**
- * Group order
- */
-__constant unsigned int N[8] = {
-    0xFFFFFFFF, 0xFFFFFFFF, 0xFFFFFFFF, 0xFFFFFFFE, 0xBAAEDCE6, 0xAF48A03B, 0xBFD25E8C, 0xD0364141
-};
-
-/**
  * Prime modulus 2^256 - 2^32 - 977
  */
 __constant unsigned int P[8] = {
@@ -369,8 +348,8 @@ inline void madd977(unsigned int *high, unsigned int *low, unsigned int *a, unsi
 inline void madd977(unsigned int *high, unsigned int *low, unsigned int *a, unsigned int *c)
 {
     *low = *a * 977;
-    unsigned int tmp = *low + *c;
-    unsigned int carry = tmp < *low ? 1 : 0;
+    __private unsigned int tmp = *low + *c;
+    __private unsigned int carry = tmp < *low ? 1 : 0;
     *low = tmp;
     *high = mad_hi(*a, (unsigned int)977, carry);
 }
@@ -392,6 +371,7 @@ inline void madd977(unsigned int *high, unsigned int *low, unsigned int *a, unsi
     borrow |= ((diff) > (tmp)) ? 1 : 0;
 
 #define add256k(a, b, c, carry, tmp)    \
+    carry = 0;                          \
     addc(a[7], b[7], c[7], carry, tmp); \
     addc(a[6], b[6], c[6], carry, tmp); \
     addc(a[5], b[5], c[5], carry, tmp); \
@@ -402,6 +382,7 @@ inline void madd977(unsigned int *high, unsigned int *low, unsigned int *a, unsi
     addc(a[0], b[0], c[0], carry, tmp);
 
 #define sub256k( a, b, c, borrow, tmp)   \
+    borrow = 0;                          \
     subc(a[7], b[7], c[7], borrow, tmp); \
     subc(a[6], b[6], c[6], borrow, tmp); \
     subc(a[5], b[5], c[5], borrow, tmp); \
@@ -424,7 +405,16 @@ inline void madd977(unsigned int *high, unsigned int *low, unsigned int *a, unsi
     )
 
 #define greaterOrEqualToP(a)    \
-    (a[6] >= P[6] || a[7] >= P[7])
+    (                           \
+        (a[0] == 0xffffffff) && \
+        (a[1] == 0xffffffff) && \
+        (a[2] == 0xffffffff) && \
+        (a[3] == 0xffffffff) && \
+        (a[4] == 0xffffffff) && \
+        (a[5] == 0xffffffff) && \
+        (a[6] >= 0xfffffffe) && \
+        (a[7] >= 0xfffffc2f)    \
+    )
 
 #define equal256k(a, b)   \
     (                     \
@@ -438,7 +428,12 @@ inline void madd977(unsigned int *high, unsigned int *low, unsigned int *a, unsi
         (a[7] == b[7])    \
     )
 
-void multiply256(const unsigned int x[8], const unsigned int y[8], unsigned int out_high[8], unsigned int out_low[8])
+#define modP256k(a, carry, tmp)        \
+    if (greaterOrEqualToP(a)) {        \
+        sub256k(a, P, a, carry, tmp);  \
+    }
+
+void multiply256k(__private const unsigned int x[8], __private const unsigned int y[8], __private unsigned int out_high[8], __private unsigned int out_low[8])
 {
     __private unsigned long product;
 
@@ -651,7 +646,7 @@ void multiply256(const unsigned int x[8], const unsigned int y[8], unsigned int 
     out_high[0] = product >> 32;
 }
 
-void mulModP(unsigned int a[8], unsigned int b[8], unsigned int product_low[8])
+void mulModP256k(__private const unsigned int a[8], __private const unsigned int b[8], __private unsigned int product_low[8])
 {
     __private unsigned int high[8];
     __private unsigned int low[8];
@@ -664,7 +659,7 @@ void mulModP(unsigned int a[8], unsigned int b[8], unsigned int product_low[8])
     __private unsigned int tmp;
 
     // 256 x 256 multiply
-    multiply256(a, b, high, low);
+    multiply256k(a, b, high, low);
     product_low[7] = low[7];
     product_low[6] = low[6];
     product_low[5] = low[5];
@@ -738,7 +733,7 @@ void mulModP(unsigned int a[8], unsigned int b[8], unsigned int product_low[8])
 /**
  * Subtraction mod p
  */
-void subModP256k(unsigned int a[8], unsigned int b[8], unsigned int c[8])
+void subModP256k(__private const unsigned int a[8], __private const unsigned int b[8], __private unsigned int c[8])
 {
     __private unsigned int borrow = 0;
     __private unsigned int tmp;
@@ -746,7 +741,6 @@ void subModP256k(unsigned int a[8], unsigned int b[8], unsigned int c[8])
     sub256k(a, b, c, borrow, tmp);
     
     if (borrow) {
-        borrow = 0;
         add256k(c, P, c, borrow, tmp);
     }
 }
@@ -754,48 +748,47 @@ void subModP256k(unsigned int a[8], unsigned int b[8], unsigned int c[8])
 /**
  * Multiplicative inverse mod P using Fermat's method of x^(p-2) mod p and addition chains
  */
-void invModP256k(unsigned int x[8])
+void invModP256k(__private unsigned int x[8])
 {
     __private unsigned int y[8] = {0, 0, 0, 0, 0, 0, 0, 1};
 
-    mulModP(x, y, y);
-    mulModP(x, x, x);
-    mulModP(x, x, x);
-    mulModP(x, y, y);
-    mulModP(x, x, x);
-    mulModP(x, y, y);
-    mulModP(x, x, x);
-    mulModP(x, x, x);
-    mulModP(x, y, y);
+    mulModP256k(x, y, y);
+    mulModP256k(x, x, x);
+    mulModP256k(x, x, x);
+    mulModP256k(x, y, y);
+    mulModP256k(x, x, x);
+    mulModP256k(x, y, y);
+    mulModP256k(x, x, x);
+    mulModP256k(x, x, x);
+    mulModP256k(x, y, y);
 
     for(int i = 0; i < 5; i++) {
-        mulModP(x, x, x);
+        mulModP256k(x, x, x);
     }
 
     for(int i = 0; i < 22; i++) {
-        mulModP(x, y, y);
-        mulModP(x, x, x);
+        mulModP256k(x, y, y);
+        mulModP256k(x, x, x);
     }
 
-    mulModP(x, x, x);
+    mulModP256k(x, x, x);
 
     for(int i = 0; i < 222; i++) {
-        mulModP(x, y, y);
-        mulModP(x, x, x);
+        mulModP256k(x, y, y);
+        mulModP256k(x, x, x);
     }
 
-    mulModP(x, y, x);
+    mulModP256k(x, y, x);
 }
 
-void addModP256k(const unsigned int a[8], const unsigned int b[8], unsigned int c[8])
+void addModP256k(__private const unsigned int a[8], __private const unsigned int b[8], __private unsigned int c[8])
 {
     __private unsigned int borrow = 0;
-    __private unsigned int carry = 0;
     __private unsigned int tmp = 0;
 
-    add256k(a, b, c, carry, tmp);
+    add256k(a, b, c, borrow, tmp);
 
-    if(carry) { sub256k(c, P, c, borrow, tmp); }
+    if(borrow) { sub256k(c, P, c, borrow, tmp); }
 
     else if(c[0] > P[0]) { sub256k(c, P, c, borrow, tmp); } 
     else if(c[0] < P[0]) {  }
@@ -821,203 +814,174 @@ void addModP256k(const unsigned int a[8], const unsigned int b[8], unsigned int 
     else if(c[7] > P[7]) { sub256k(c, P, c, borrow, tmp); } 
 }
 
-void doBatchInverse256k(unsigned int x[8])
-{
-    invModP256k(x);
+void doublePoint(__private unsigned int x[8], __private unsigned int y[8]) {
+        unsigned int yInv[8];
+        unsigned int x3[8];
+        unsigned int rx[8];
+        unsigned int ry[8];
+        unsigned int s[8];
+
+        addModP256k(y, y, yInv);
+        invModP256k(yInv);
+        
+	    // s = 3x^2 / 2y
+        mulModP256k(x, x, x3);      // x^2
+
+        addModP256k(x3, x3, s);     // 2x^2
+        addModP256k(s, x3, s);      // 3x^2
+        mulModP256k(s, yInv, s);    // 3x^2 / 2y
+
+	    //rx = s^2 - 2x
+        mulModP256k(s, s, rx);
+        subModP256k(rx, x, rx);
+        subModP256k(rx, x, rx);
+
+	    //ry = s * (px - rx) - py
+        subModP256k(x, rx, ry);
+        mulModP256k(s, ry, ry);
+        subModP256k(ry, y, ry);
+
+        x[0] = rx[0];
+        x[1] = rx[1];
+        x[2] = rx[2];
+        x[3] = rx[3];
+        x[4] = rx[4];
+        x[5] = rx[5];
+        x[6] = rx[6];
+        x[7] = rx[7];
+
+        y[0] = ry[0];
+        y[1] = ry[1];
+        y[2] = ry[2];
+        y[3] = ry[3];
+        y[4] = ry[4];
+        y[5] = ry[5];
+        y[6] = ry[6];
+        y[7] = ry[7];
 }
 
-void beginBatchAdd256k(
-    const uint256_t px,
-    const uint256_t x,
-    __global uint256_t* chain,
-    const int i,
-    const int batchIdx,
-    uint256_t* inverse
-) {
-    __private int gid = get_local_size(0) * get_group_id(0) + get_local_id(0);
-    __private int dim = get_global_size(0);
+void addPoints(__private unsigned int x1[8], __private unsigned int y1[8], __private unsigned int x2[8], __private unsigned int y2[8]) {
 
-    __private unsigned int t[8];
+	if(equal256k(x1,x2) && equal256k(y1,y2)) {
+		doublePoint(x1, y1);
+        return;
+	}
+    
+	if(equal256k(x1, x2)) {
+        x1[0] = 0xFFFFFFFF;
+        x1[1] = 0xFFFFFFFF;
+        x1[2] = 0xFFFFFFFF;
+        x1[3] = 0xFFFFFFFF;
+        x1[4] = 0xFFFFFFFF;
+        x1[5] = 0xFFFFFFFF;
+        x1[6] = 0xFFFFFFFF;
+        x1[7] = 0xFFFFFFFF;
+        y1[0] = 0xFFFFFFFF;
+        y1[1] = 0xFFFFFFFF;
+        y1[2] = 0xFFFFFFFF;
+        y1[3] = 0xFFFFFFFF;
+        y1[4] = 0xFFFFFFFF;
+        y1[5] = 0xFFFFFFFF;
+        y1[6] = 0xFFFFFFFF;
+        y1[7] = 0xFFFFFFFF;
+        return;
+	}
 
-    // x = Gx - x
-    subModP256k(px.v, x.v, t);
+	if(isInfinity256k(x1) && isInfinity256k(y1)) {
+        x1[0] = x2[0];
+        x1[1] = x2[1];
+        x1[2] = x2[2];
+        x1[3] = x2[3];
+        x1[4] = x2[4];
+        x1[5] = x2[5];
+        x1[6] = x2[6];
+        x1[7] = x2[7];
 
+        y1[0] = y2[0];
+        y1[1] = y2[1];
+        y1[2] = y2[2];
+        y1[3] = y2[3];
+        y1[4] = y2[4];
+        y1[5] = y2[5];
+        y1[6] = y2[6];
+        y1[7] = y2[7];
+        
+        return;
+	}
 
-    // Keep a chain of multiples of the diff, i.e. c[0] = diff0, c[1] = diff0 * diff1,
-    // c[2] = diff2 * diff1 * diff0, etc
-    mulModP(inverse->v, t, inverse->v);
+	if(isInfinity256k(x2) && isInfinity256k(y2)) {
+        return;
+	}
 
-    chain[batchIdx * dim + gid] = *inverse;
+    unsigned int rise[8];
+	subModP256k(y1, y2, rise);
+
+    unsigned int run[8];
+    unsigned int s[8];
+	subModP256k(x1, x2, run);
+    invModP256k(run);
+    mulModP256k(rise, run, s);
+
+	//rx = (s*s - px - qx) % _p;
+    unsigned int rx[8];
+    mulModP256k(s, s, rx);
+    subModP256k(rx, x1, rx);
+    subModP256k(rx, x2, rx);
+
+	//ry = (s * (px - rx) - py) % _p;
+    unsigned int ry[8];
+    subModP256k(x1, rx, ry);
+    mulModP256k(s, ry, ry);
+    subModP256k(ry, y1, ry);
+    
+    x1[0] = rx[0];
+    x1[1] = rx[1];
+    x1[2] = rx[2];
+    x1[3] = rx[3];
+    x1[4] = rx[4];
+    x1[5] = rx[5];
+    x1[6] = rx[6];
+    x1[7] = rx[7];
+
+    y1[0] = ry[0];
+    y1[1] = ry[1];
+    y1[2] = ry[2];
+    y1[3] = ry[3];
+    y1[4] = ry[4];
+    y1[5] = ry[5];
+    y1[6] = ry[6];
+    y1[7] = ry[7];
 }
 
-void beginBatchAddWithDouble256k(
-    const uint256_t px,
-    const uint256_t py,
-    __global uint256_t* xPtr,
-    __global uint256_t* chain,
-    const int i,
-    const int batchIdx,
-    uint256_t* inverse
-) {
-    __private int gid = get_local_size(0) * get_group_id(0) + get_local_id(0);
-    __private int dim = get_global_size(0);
-    __private uint256_t x = xPtr[i];
+void generatePubKey(__private const unsigned int k[8],__private unsigned int x[8],__private unsigned int y[8]) {
 
-    if(equal256k(px.v, x.v)) {
-        addModP256k(py.v,py.v, x.v);
-    } else {
-        // x = Gx - x
-        subModP256k(px.v, x.v, x.v);
-    }
+    x[0] = 0xFFFFFFFF;
+    x[1] = 0xFFFFFFFF;
+    x[2] = 0xFFFFFFFF;
+    x[3] = 0xFFFFFFFF;
+    x[4] = 0xFFFFFFFF;
+    x[5] = 0xFFFFFFFF;
+    x[6] = 0xFFFFFFFF;
+    x[7] = 0xFFFFFFFF;
 
-    // Keep a chain of multiples of the diff, i.e. c[0] = diff0, c[1] = diff0 * diff1,
-    // c[2] = diff2 * diff1 * diff0, etc
-    mulModP(x.v, inverse->v, inverse->v);
+    y[0] = 0xFFFFFFFF;
+    y[1] = 0xFFFFFFFF;
+    y[2] = 0xFFFFFFFF;
+    y[3] = 0xFFFFFFFF;
+    y[4] = 0xFFFFFFFF;
+    y[5] = 0xFFFFFFFF;
+    y[6] = 0xFFFFFFFF;
+    y[7] = 0xFFFFFFFF;
+    
+    unsigned int gx[8] = { 0x79BE667E, 0xF9DCBBAC, 0x55A06295, 0xCE870B07, 0x029BFCDB, 0x2DCE28D9, 0x59F2815B, 0x16F81798 };
+    unsigned int gy[8] = { 0x483ADA77, 0x26A3C465, 0x5DA4FBFC, 0x0E1108A8, 0xFD17B448, 0xA6855419, 0x9C47D08F, 0xFB10D4B8 };
 
-    chain[batchIdx * dim + gid] = *inverse;
-}
-
-void completeBatchAdd256k(
-    const uint256_t px,
-    const uint256_t py,
-    __global uint256_t* xPtr,
-    __global uint256_t* yPtr,
-    const int i,
-    const int batchIdx,
-    __global uint256_t* chain,
-    uint256_t* inverse,
-    uint256_t* newX,
-    uint256_t* newY)
-{
-    __private int gid = get_local_size(0) * get_group_id(0) + get_local_id(0);
-    __private int dim = get_global_size(0);
-    __private uint256_t x = xPtr[i];
-    __private uint256_t y = yPtr[i];
-	
-    uint256_t s;
-    __private unsigned int tmp[8];
-
-    if(batchIdx != 0) {
-        uint256_t c;
-
-        c = chain[(batchIdx - 1) * dim + gid];
-        mulModP(inverse->v, c.v, s.v);
-
-        subModP256k(px.v, x.v, tmp);
-        mulModP(tmp, inverse->v, inverse->v);
-    } else {
-        s = *inverse;
-    }
-
-	subModP256k(py.v, y.v, tmp);
-
-    mulModP(tmp, s.v, s.v);
-
-    // Rx = s^2 - Gx - Qx
-    mulModP(s.v, s.v, tmp);
-
-    subModP256k(tmp, px.v, newX->v);
-    subModP256k(newX->v, x.v, newX->v);
-
-    // Ry = s(px - rx) - py
-	subModP256k(px.v, newX->v, tmp);
-    mulModP(s.v, tmp, newY->v);
-    subModP256k(newY->v, py.v, newY->v);
-}
-
-void completeBatchAddWithDouble256k(
-    const uint256_t px,
-    const uint256_t py,
-    __global const uint256_t* xPtr,
-    __global const uint256_t* yPtr,
-    const int i,
-    const int batchIdx,
-    __global uint256_t* chain,
-    uint256_t* inverse,
-    uint256_t* newX,
-    uint256_t* newY)
-{
-    __private int gid = get_local_size(0) * get_group_id(0) + get_local_id(0);
-    __private int dim = get_global_size(0);
-    __private uint256_t s;
-    __private uint256_t x;
-    __private uint256_t y;
-
-    x = xPtr[i];
-    y = yPtr[i];
-
-    if(batchIdx >= 1) {
-
-        __private uint256_t c;
-
-        c = chain[(batchIdx - 1) * dim + gid];
-        mulModP(inverse->v, c.v, s.v);
-
-        uint256_t diff;
-        if(equal256k(px.v, x.v)) {
-            addModP256k(py.v, py.v, diff.v);
-        } else {
-            subModP256k(px.v, x.v, diff.v);
+	for(int i = 255; i >= 0; i--) {
+		if(k[i / 32] >> abs((i - 255) % 32) & 1 ) {
+            addPoints(x, y, gx, gy);
         }
-
-        mulModP(diff.v, inverse->v, inverse->v);
-    } else {
-        s = *inverse;
+        doublePoint(gx, gy);
     }
-
-
-    if(equal256k(px.v, x.v)) {
-        // currently s = 1 / 2y
-
-        __private uint256_t x2;
-        __private uint256_t tx2;
-
-        // 3x^2
-        mulModP(x.v, x.v, x2.v);
-        addModP256k(x2.v, x2.v, tx2.v);
-        addModP256k(x2.v, tx2.v, tx2.v);
-
-        // s = 3x^2 * 1/2y
-        mulModP(tx2.v, s.v, s.v);
-
-        // s^2
-        __private uint256_t s2;
-        mulModP(s.v, s.v, s2.v);
-
-        // Rx = s^2 - 2px
-        subModP256k(s2.v, x.v, newX->v);
-        subModP256k(newX->v, x.v, newX->v);
-
-        // Ry = s(px - rx) - py
-        __private uint256_t k;
-				subModP256k(px.v, newX->v, k.v);
-        mulModP(s.v, k.v, newY->v);
-        subModP256k(newY->v, py.v,newY->v);
-    } else {
-
-        __private uint256_t rise;
-        subModP256k(py.v, y.v, rise.v);
-
-        mulModP(rise.v, s.v, s.v);
-
-        // Rx = s^2 - Gx - Qx
-        __private uint256_t s2;
-        mulModP(s.v, s.v, s2.v);
-
-        subModP256k(s2.v, px.v, newX->v);
-        subModP256k(newX->v, x.v,newX->v);
-
-        // Ry = s(px - rx) - py
-        __private uint256_t k;
-        subModP256k(px.v, newX->v, k.v);
-        mulModP(s.v, k.v, newY->v);
-        subModP256k(newY->v, py.v, newY->v);
-    }
-}
-
-unsigned int readWord256k(__global const uint256_t* ara, const int idx, const int word)
-{
-    return ara[idx].v[word];
 }
 
 #endif
@@ -1076,7 +1040,6 @@ void sha256PublicKey(const unsigned int x[8], const unsigned int y[8], unsigned 
     g = _IV[6];
     h = _IV[7];
 
-    // 0x04 || x || y
     w[0] = (x[0] >> 8) | 0x04000000;
     w[1] = (x[1] >> 8) | (x[0] << 24);
     w[2] = (x[2] >> 8) | (x[1] << 24);
@@ -1222,7 +1185,6 @@ void sha256PublicKey(const unsigned int x[8], const unsigned int y[8], unsigned 
     g += _IV[6];
     h += _IV[7];
 
-    // store the intermediate hash value
     digest[0] = a;
     digest[1] = b;
     digest[2] = c;
@@ -1370,7 +1332,6 @@ void sha256PublicKeyCompressed(const unsigned int x[8], unsigned int yParity, un
     __private unsigned int w[16];
     __private unsigned int t;
 
-    // 0x03 || x  or  0x02 || x
     w[0] = 0x02000000 | ((yParity & 1) << 24) | (x[0] >> 8);
 
     w[1] = (x[1] >> 8) | (x[0] << 24);
@@ -1571,7 +1532,7 @@ void hashPublicKey(const uint256_t x, const uint256_t y, unsigned int digest[5])
 #ifndef BLOOMFILTER_CL
 #define BLOOMFILTER_CL
 
-bool isInBloomFilter(const unsigned int hash[5], __global unsigned int *targetList, const ulong *mask)
+bool isInBloomFilter(__private const unsigned int hash[5], __global const unsigned int *targetList, const ulong *mask)
 {
     unsigned int h5 = hash[0] + hash[1] + hash[2] + hash[3] + hash[4];
 
@@ -1592,213 +1553,136 @@ bool isInBloomFilter(const unsigned int hash[5], __global unsigned int *targetLi
 #define BOTH 2
 
 typedef struct {
-    int idx;
     bool compressed;
+    unsigned int privateKey[8];
     unsigned int x[8];
     unsigned int y[8];
     unsigned int digest[5];
-}CLDeviceResult;
+} CLDeviceResult;
 
-void setResultFound(
-    const int idx,
-    const bool compressed,
-    const uint256_t x,
-    const uint256_t y,
-    const unsigned int digest[5],
+void addResult(
+    __private const bool compressed,
+    __private const uint256_t privateKey,
+    __private const uint256_t x,
+    __private const uint256_t y,
+    __private const unsigned int digest[5],
     __global CLDeviceResult* results,
     __global unsigned int* numResults
 ) {
-    CLDeviceResult r;
+    CLDeviceResult result;
 
-    r.idx = idx;
-    r.compressed = compressed;
+    result.compressed = compressed;
 
-    r.x[0] = x.v[0];
-    r.x[1] = x.v[1];
-    r.x[2] = x.v[2];
-    r.x[3] = x.v[3];
-    r.x[4] = x.v[4];
-    r.x[5] = x.v[5];
-    r.x[6] = x.v[6];
-    r.x[7] = x.v[7];
+    result.privateKey[0] = privateKey.v[0];
+    result.privateKey[1] = privateKey.v[1];
+    result.privateKey[2] = privateKey.v[2];
+    result.privateKey[3] = privateKey.v[3];
+    result.privateKey[4] = privateKey.v[4];
+    result.privateKey[5] = privateKey.v[5];
+    result.privateKey[6] = privateKey.v[6];
+    result.privateKey[7] = privateKey.v[7];
 
-    r.y[0] = y.v[0];
-    r.y[1] = y.v[1];
-    r.y[2] = y.v[2];
-    r.y[3] = y.v[3];
-    r.y[4] = y.v[4];
-    r.y[5] = y.v[5];
-    r.y[6] = y.v[6];
-    r.y[7] = y.v[7];
+    result.x[0] = x.v[0];
+    result.x[1] = x.v[1];
+    result.x[2] = x.v[2];
+    result.x[3] = x.v[3];
+    result.x[4] = x.v[4];
+    result.x[5] = x.v[5];
+    result.x[6] = x.v[6];
+    result.x[7] = x.v[7];
 
-    ripemd160FinalRound(digest, r.digest);
+    result.y[0] = y.v[0];
+    result.y[1] = y.v[1];
+    result.y[2] = y.v[2];
+    result.y[3] = y.v[3];
+    result.y[4] = y.v[4];
+    result.y[5] = y.v[5];
+    result.y[6] = y.v[6];
+    result.y[7] = y.v[7];
 
-    results[atomic_add(numResults, 1)] = r;
+    ripemd160FinalRound(digest, result.digest);
+
+    results[atomic_add(numResults, 1)] = result;
 }
 
-__kernel void _initKeysKernel(
-    const unsigned int totalPoints,
-    const unsigned int step,
-    __global uint256_t* privateKeys,
-    __global uint256_t* chain,
-    __global uint256_t* gxPtr,
-    __global uint256_t* gyPtr,
-    __global uint256_t* xPtr,
-    __global uint256_t* yPtr)
-{
-    uint256_t gx;
-    uint256_t gy;
-    int i = get_local_size(0) * get_group_id(0) + get_local_id(0);
-    int dim = get_global_size(0);
+/*
+void div2(unsigned int a[8], unsigned int c[8]) {
+    unsigned int carry = 0;
 
-    gx = gxPtr[step];
-    gy = gyPtr[step];
+    c[0] = (a[0] + carry) >> 1;
+    carry = a[0] % 2;
+    
+    c[1] = (a[1] + carry) >> 1;
+    carry = a[1] % 2;
+    
+    c[2] = (a[2] + carry) >> 1;
+    carry = a[2] % 2;
+    
+    c[3] = (a[3] + carry) >> 1;
+    carry = a[3] % 2;
+    
+    c[4] = (a[4] + carry) >> 1;
+    carry = a[4] % 2;
+    
+    c[5] = (a[5] + carry) >> 1;
+    carry = a[5] % 2;
 
-    uint256_t inverse = { {0,0,0,0,0,0,0,1} };
+    c[6] = (a[6] + carry) >> 1;
+    carry = a[6] % 2;
 
-    int batchIdx = 0;
-
-    for(; i < totalPoints; i += dim) {
-        if(( (readWord256k(privateKeys, i, 7 - step / 32)) & (1 << (step % 32))) != 0) {
-            if(!isInfinity256k(xPtr[i].v)) {
-                beginBatchAddWithDouble256k(gx, gy, xPtr, chain, i, batchIdx, &inverse);
-                batchIdx++;
-            }
-        }
-    }
-
-    doBatchInverse256k(inverse.v);
-
-    uint256_t newX;
-    uint256_t newY;
-    i -= dim;
-    for(; i >= 0; i -= dim) {
-        if(((readWord256k(privateKeys, i, 7 - step / 32)) & (1 << (step % 32))) != 0) {
-            if(!isInfinity256k(xPtr[i].v)) {
-                batchIdx--;
-                completeBatchAddWithDouble256k(gx, gy, xPtr, yPtr, i, batchIdx, chain, &inverse, &newX, &newY);
-            } else {
-                newX = gx;
-                newY = gy;
-            }
-
-            xPtr[i] = newX;
-            yPtr[i] = newY;
-        }
-    }
+    c[7] = (a[7] + carry) >> 1;
 }
+*/
 
 __kernel void _stepKernel(
+    const unsigned int i,
     const unsigned int totalPoints,
-    __global uint256_t* chain,
-    __global uint256_t* xPtr,
-    __global uint256_t* yPtr,
     __global uint256_t* incXPtr,
     __global uint256_t* incYPtr,
-    __global unsigned int* targetList,
+    __global const unsigned int* targetList,
     const ulong mask,
-    __global CLDeviceResult *results,
-    __global unsigned int *numResults)
-{
-    int i = get_local_size(0) * get_group_id(0) + get_local_id(0);
-    int dim = get_global_size(0);
+    __global CLDeviceResult* results,
+    __global unsigned int* numResults) {
 
-    uint256_t incX = *incXPtr;
-    uint256_t incY = *incYPtr;
+    __private uint256_t k = {{0,0,0,0,0,0,0,1}};
+    k.v[7] = get_local_id(0);
 
-    // Multiply together all (_Gx - x) and then invert
-    uint256_t inverse = { {0,0,0,0,0,0,0,1} };
-    int batchIdx = 0;
+    __private unsigned int digest[5];
+    __private uint256_t x;
+    __private uint256_t y;
 
-    unsigned int digest[5];
-
-    for(; i < totalPoints; i += dim) {
-       
-#if defined(COMPRESSION_UNCOMPRESSED) || defined(COMPRESSION_BOTH)
-        hashPublicKey(xPtr[i], yPtr[i], digest);
+    generatePubKey(k.v, x.v,y.v);
+    
+    #if defined(COMPRESSION_UNCOMPRESSED) || defined(COMPRESSION_BOTH)
+        hashPublicKey(x, y, digest);
         if(isInBloomFilter(digest, targetList, &mask)) {
-            setResultFound(i, false, xPtr[i], yPtr[i], digest, results, numResults);
+            addResult(false, k, x, y, digest, results, numResults);
         }
-#endif
-#if defined(COMPRESSION_COMPRESSED) || defined(COMPRESSION_BOTH)
-        hashPublicKeyCompressed(xPtr[i], yPtr[i].v[7], digest);
+    #endif
+    #if defined(COMPRESSION_COMPRESSED) || defined(COMPRESSION_BOTH)
+        hashPublicKeyCompressed(x, y.v[7], digest);
         if(isInBloomFilter(digest, targetList, &mask)) {
-            setResultFound(i, true, xPtr[i], yPtr[i], digest, results, numResults);
+            addResult(true, k, x, y, digest, results, numResults);
         }
-#endif
-        beginBatchAdd256k(incX, xPtr[i], chain, i, batchIdx, &inverse);
-        batchIdx++;
+    #endif
+
+    /**
+    for(int i = 0; i < totalPoints; i++) {
+        addPoints(x, y, incXPtr, incYPtr);
+
+        #if defined(COMPRESSION_UNCOMPRESSED) || defined(COMPRESSION_BOTH)
+            hashPublicKey(x, y, digest);
+            if(isInBloomFilter(digest, targetList, &mask)) {
+                addResult(false, k, x, y, digest, results, numResults);
+            }
+        #endif
+        #if defined(COMPRESSION_COMPRESSED) || defined(COMPRESSION_BOTH)
+            hashPublicKeyCompressed(x, y.v[7], digest);
+            if(isInBloomFilter(digest, targetList, &mask)) {
+                addResult(true, k, x, y, digest, results, numResults);
+            }
+        #endif
     }
-
-    doBatchInverse256k(inverse.v);
-
-    i -= dim;
-    uint256_t newX;
-    uint256_t newY;
-    for(;  i >= 0; i -= dim) {
-
-        batchIdx--;
-        completeBatchAdd256k(incX, incY, xPtr, yPtr, i, batchIdx, chain, &inverse, &newX, &newY);
-
-        xPtr[i] = newX;
-        yPtr[i] = newY;
-    }
-}
-
-__kernel void _stepKernelWithDouble(
-    const unsigned int totalPoints,
-    __global uint256_t* chain,
-    __global uint256_t* xPtr,
-    __global uint256_t* yPtr,
-    __global uint256_t* incXPtr,
-    __global uint256_t* incYPtr,
-    __global unsigned int* targetList,
-    const ulong mask,
-    __global CLDeviceResult *results,
-    __global unsigned int *numResults)
-{
-    int i = get_local_size(0) * get_group_id(0) + get_local_id(0);
-    int dim = get_global_size(0);
-
-    uint256_t incX = *incXPtr;
-    uint256_t incY = *incYPtr;
-
-    // Multiply together all (_Gx - x) and then invert
-    uint256_t inverse = { {0,0,0,0,0,0,0,1} };
-
-    int batchIdx = 0;
-    unsigned int digest[5];
-
-    for(; i < totalPoints; i += dim) {
-
-#if defined(COMPRESSION_UNCOMPRESSED) || defined(COMPRESSION_BOTH)
-        hashPublicKey(xPtr[i], yPtr[i], digest);
-        if(isInBloomFilter(digest, targetList, &mask)) {
-            setResultFound(i, false, xPtr[i], yPtr[i], digest, results, numResults);
-        }
-#endif
-#if defined(COMPRESSION_COMPRESSED) || defined(COMPRESSION_BOTH)
-        hashPublicKeyCompressed(xPtr[i], yPtr[i].v[7], digest);
-        if(isInBloomFilter(digest, targetList, &mask)) {
-            setResultFound(i, true, xPtr[i], yPtr[i], digest, results, numResults);
-        }
-#endif
-
-        beginBatchAddWithDouble256k(incX, incY, xPtr, chain, i, batchIdx, &inverse);
-        batchIdx++;
-    }
-
-    doBatchInverse256k(inverse.v);
-
-    i -= dim;
-
-    uint256_t newX;
-    uint256_t newY;
-    for(; i >= 0; i -= dim) {
-        batchIdx--;
-        completeBatchAddWithDouble256k(incX, incY, xPtr, yPtr, i, batchIdx, chain, &inverse, &newX, &newY);
-
-        xPtr[i] = newX;
-        yPtr[i] = newY;
-    }
+    */
+    
 }

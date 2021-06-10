@@ -7,12 +7,12 @@
 extern char _bitcrack_cl[];
 
 typedef struct {
-    int idx;
     bool compressed;
+    unsigned int privateKey[8];
     unsigned int x[8];
     unsigned int y[8];
     unsigned int digest[5];
-}CLDeviceResult;
+} CLDeviceResult;
 
 static void undoRMD160FinalRound(const unsigned int hIn[5], unsigned int hOut[5])
 {
@@ -63,8 +63,7 @@ CLKeySearchDevice::CLKeySearchDevice(uint64_t device, int threads, int pointsPer
         Logger::log(LogLevel::Info, "Compiling OpenCL kernels...");
         _clProgram = new cl::CLProgram(*_clContext, _bitcrack_cl, options);
 
-        // Load the kernels
-        _initKeysKernel = new cl::CLKernel(*_clProgram, "_initKeysKernel");
+        // Load the kernel
         _stepKernel = new cl::CLKernel(*_clProgram, "_stepKernel");
 
         _globalMemSize = _clContext->getGlobalMemorySize();
@@ -79,10 +78,6 @@ CLKeySearchDevice::CLKeySearchDevice(uint64_t device, int threads, int pointsPer
 
 CLKeySearchDevice::~CLKeySearchDevice()
 {
-    _clContext->free(_x);
-    _clContext->free(_y);
-    _clContext->free(_xTable);
-    _clContext->free(_yTable);
     _clContext->free(_xInc);
     _clContext->free(_yInc);
     _clContext->free(_deviceResults);
@@ -107,7 +102,7 @@ void CLKeySearchDevice::initializeBloomFilter(const std::vector<struct hash160> 
     size_t sizeInWords = (mask + 1) / 32;
     _targetMemSize = sizeInWords * sizeof(uint32_t);
 
-    Logger::log(LogLevel::Info, "Initializing BloomFilter (" + util::format("%.1f", (double)_targetMemSize / (double)(1024 * 1024)) + "MB)");
+    Logger::log(LogLevel::Info, "Initializing BloomFilter (" + util::format("%.1f", (double)_targetMemSize / (double)(1024)) + "KB)");
 
     uint32_t *buf = new uint32_t[sizeInWords];
 
@@ -154,12 +149,6 @@ void CLKeySearchDevice::allocateBuffers()
     size_t size = numKeys * 8 * sizeof(unsigned int);
 
     _bufferMemSize = 
-        size +                           // _x
-        size +                           // _y
-        size +                           // _chain
-        size +                           // _privateKeys
-        256 * 8 * sizeof(unsigned int) + // _xTable
-        256 * 8 * sizeof(unsigned int) + // _yTable
         8 * sizeof(unsigned int) +       // _xInc
         8 * sizeof(unsigned int) +       // _yInc
         128 * sizeof(CLDeviceResult) +   // _deviceResults
@@ -167,23 +156,6 @@ void CLKeySearchDevice::allocateBuffers()
 
     Logger::log(LogLevel::Info, "Allocating Memory for Buffers (" + util::format("%.1f", (double)_bufferMemSize / (double)(1024 * 1024)) + "MB)");
 
-    // X values
-    _x = _clContext->malloc(size);
-    _clContext->memset(_x, -1, size);
-
-    // Y values
-    _y = _clContext->malloc(size);
-    _clContext->memset(_y, -1, size);
-
-    // Multiplicaiton chain for batch inverse
-    _chain = _clContext->malloc(size);
-
-    // Private keys for initialization
-    _privateKeys = _clContext->malloc(size, CL_MEM_READ_ONLY);
-
-    // Lookup table for initialization
-    _xTable = _clContext->malloc(256 * 8 * sizeof(unsigned int), CL_MEM_READ_ONLY);
-    _yTable = _clContext->malloc(256 * 8 * sizeof(unsigned int), CL_MEM_READ_ONLY);
 
     // Value to increment by
     _xInc = _clContext->malloc(8 * sizeof(unsigned int), CL_MEM_READ_ONLY);
@@ -220,8 +192,6 @@ void CLKeySearchDevice::init(const secp256k1::uint256 &start, int compression, c
     try {
         allocateBuffers();
 
-        generateStartingPoints();
-
         // Set the incrementor
         secp256k1::ecpoint p = secp256k1::multiplyPoint(secp256k1::uint256((uint64_t)_points ) * _stride, secp256k1::G());
         setIncrementor(p);
@@ -234,10 +204,8 @@ void CLKeySearchDevice::doStep()
 {
     try {
         _stepKernel->set_args(
+            _iterations,
             _points,
-            _chain,
-            _x,
-            _y,
             _xInc,
             _yInc,
             _deviceTargetList.ptr,
@@ -375,11 +343,7 @@ void CLKeySearchDevice::getResultsInternal()
 
             KeySearchResult minerResult;
 
-            // Calculate the private key based on the number of iterations and the current thread
-            secp256k1::uint256 offset = secp256k1::uint256((uint64_t)_points * _iterations) + secp256k1::uint256(ptr[i].idx) * _stride;
-            secp256k1::uint256 privateKey = secp256k1::addModN(_start, offset);
-
-            minerResult.privateKey = privateKey;
+            minerResult.privateKey = secp256k1::uint256(ptr[i].privateKey, secp256k1::uint256::BigEndian);
             minerResult.compressed = ptr[i].compressed;
 
             memcpy(minerResult.hash, ptr[i].digest, 20);
@@ -411,94 +375,6 @@ secp256k1::uint256 CLKeySearchDevice::readBigInt(unsigned int *src, int idx)
 
     return v;
 }
-
-void CLKeySearchDevice::initializeBasePoints()
-{
-    // generate a table of points G, 2G, 4G, 8G...(2^255)G
-    std::vector<secp256k1::ecpoint> table;
-
-    table.push_back(secp256k1::G());
-    for (uint64_t i = 1; i < 256; i++) {
-
-        secp256k1::ecpoint p = doublePoint(table[i - 1]);
-#ifdef DEBUG
-        if (!pointExists(p)) {
-            throw std::string("Point does not exist!");
-        }
-#endif
-        table.push_back(p);
-    }
-
-    size_t count = 256;
-
-    unsigned int* tmpX = new unsigned int[count * 8];
-    unsigned int* tmpY = new unsigned int[count * 8];
-
-    for (int i = 0; i < 256; i++) {
-        unsigned int bufX[8];
-        unsigned int bufY[8];
-        table[i].x.exportWords(bufX, 8, secp256k1::uint256::BigEndian);
-        table[i].y.exportWords(bufY, 8, secp256k1::uint256::BigEndian);
-
-        for (int j = 0; j < 8; j++) {
-            tmpX[i * 8 + j] = bufX[j];
-            tmpY[i * 8 + j] = bufY[j];
-        }
-    }
-
-    table.clear();
-    table.shrink_to_fit();
-
-    _clContext->copyHostToDevice(tmpX, _xTable, count * 8 * sizeof(unsigned int));
-    delete[] tmpX;
-
-    _clContext->copyHostToDevice(tmpY, _yTable, count * 8 * sizeof(unsigned int));
-    delete[] tmpY;
-}
-
-void CLKeySearchDevice::generateStartingPoints()
-{
-    uint64_t totalPoints = (uint64_t)_points;
-    // TODO: Magic Number 40?
-    uint64_t totalMemory = totalPoints * 40;
-
-    initializeBasePoints();
-
-    _pointsMemSize = totalPoints * sizeof(unsigned int) * 16 + _points * sizeof(unsigned int) * 8;
-
-    Logger::log(LogLevel::Info, "Generating " + util::formatThousands(totalPoints) + " starting points (" + util::format("%.1f", (double)totalMemory / (double)(1024 * 1024)) + "MB)");
-
-    unsigned int *privateKeys = new unsigned int[8 * totalPoints];
-
-    // Generate key pairs for k, k+1, k+2 ... k + <total points in parallel - 1>
-    secp256k1::uint256 privKey = _start;
-    splatBigInt(privateKeys, 0, privKey);
-    
-    for(uint64_t i = 1; i < totalPoints; i++) {
-        privKey = privKey.add(_stride);
-        splatBigInt(privateKeys, i, privKey);
-    }
-
-    // Copy to device
-    _clContext->copyHostToDevice(privateKeys, _privateKeys, totalPoints * 8 * sizeof(unsigned int));
-
-    delete[] privateKeys;
-
-    // Show progress in 10% increments
-    double pct = 10.0;
-    for(int i = 0; i < 256; i++) {
-        _initKeysKernel->set_args(_points, i, _privateKeys, _chain, _xTable, _yTable, _x, _y);
-        _initKeysKernel->call(_blocks, _threads);
-
-        if(((double)(i+1.0) / 256.0) * 100.0 >= pct) {
-            Logger::log(LogLevel::Info, util::format("%.1f%%", pct));
-            pct += 10.0;
-        }
-    }
-
-    Logger::log(LogLevel::Info, "Done");
-}
-
 
 secp256k1::uint256 CLKeySearchDevice::getNextKey()
 {

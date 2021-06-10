@@ -75,7 +75,7 @@ __constant unsigned int K[8] = {
     a = rotl((a), (s)) + (e);\
     c = rotl((c), 10)
 
-void ripemd160p1(const unsigned int x[8], unsigned int digest[5])
+void ripemd160p1(__private const unsigned int x[8], unsigned int digest[5])
 {
     __private unsigned int a = RIPEMD160_IV[0];
     __private unsigned int b = RIPEMD160_IV[1];

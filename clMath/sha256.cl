@@ -53,7 +53,6 @@ void sha256PublicKey(const unsigned int x[8], const unsigned int y[8], unsigned 
     g = _IV[6];
     h = _IV[7];
 
-    // 0x04 || x || y
     w[0] = (x[0] >> 8) | 0x04000000;
     w[1] = (x[1] >> 8) | (x[0] << 24);
     w[2] = (x[2] >> 8) | (x[1] << 24);
@@ -199,7 +198,6 @@ void sha256PublicKey(const unsigned int x[8], const unsigned int y[8], unsigned 
     g += _IV[6];
     h += _IV[7];
 
-    // store the intermediate hash value
     digest[0] = a;
     digest[1] = b;
     digest[2] = c;
@@ -347,7 +345,6 @@ void sha256PublicKeyCompressed(const unsigned int x[8], unsigned int yParity, un
     __private unsigned int w[16];
     __private unsigned int t;
 
-    // 0x03 || x  or  0x02 || x
     w[0] = 0x02000000 | ((yParity & 1) << 24) | (x[0] >> 8);
 
     w[1] = (x[1] >> 8) | (x[0] << 24);

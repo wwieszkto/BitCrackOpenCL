@@ -92,7 +92,6 @@ void Hash::hashPublicKey(const unsigned int *x, const unsigned int *y, unsigned 
 	unsigned int msg[16];
 	unsigned int sha256Digest[8];
 
-	// 0x04 || x || y
 	msg[15] = (y[7] >> 8) | (y[6] << 24);
 	msg[14] = (y[6] >> 8) | (y[5] << 24);
 	msg[13] = (y[5] >> 8) | (y[4] << 24);

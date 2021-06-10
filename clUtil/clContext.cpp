@@ -7,6 +7,8 @@
 #include "clContext.h"
 #include "util.h"
 
+#define CL_TARGET_OPENCL_VERSION (120)
+
 cl::CLContext::CLContext(cl_device_id device)
 {
     _device = device;

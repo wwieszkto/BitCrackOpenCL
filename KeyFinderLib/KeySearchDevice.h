@@ -29,8 +29,8 @@ public:
 
 typedef struct {
     std::string address;
-    secp256k1::ecpoint publicKey;
     secp256k1::uint256 privateKey;
+    secp256k1::ecpoint publicKey;
     unsigned int hash[5];
     bool compressed;
 }KeySearchResult;
